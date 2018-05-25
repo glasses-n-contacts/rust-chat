@@ -12,8 +12,6 @@ pub struct WebSocketServer {
     pub token_counter: usize
 }
 
-const SERVER_TOKEN: Token = Token(0);
-
 impl Handler for WebSocketServer {
     type Timeout = usize;
     type Message = ();
@@ -24,7 +22,7 @@ impl Handler for WebSocketServer {
         // Are we dealing with the read event?
         if events.is_readable() {
             match token {
-                SERVER_TOKEN => {
+                ::SERVER_TOKEN => {
                     let client_socket = match self.socket.accept() {
                         Err(e) => {
                             println!("Accept error: {}", e);

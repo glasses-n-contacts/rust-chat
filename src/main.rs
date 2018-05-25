@@ -6,9 +6,9 @@ use mio::tcp::*;
 use std::collections::HashMap;
 
 use chat::socket_server::WebSocketServer;
+use chat::SERVER_TOKEN;
 
 fn main() {
-    const SERVER_TOKEN: Token = Token(0);
     let address = "0.0.0.0:10000".parse().unwrap();
     let server_socket = TcpListener::bind(&address).unwrap();
                         
