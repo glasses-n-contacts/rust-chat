@@ -31,7 +31,6 @@ fn gen_key(key: &String) -> String {
 
 pub struct WebSocketClient {
     pub socket: TcpStream,
-    pub http_parser: Parser<HttpParser>,
     pub headers: Rc<RefCell<HashMap<String, String>>>,
     // Adding a new `interest` property:
     pub interest: EventSet,
@@ -41,7 +40,7 @@ pub struct WebSocketClient {
 }
 
 impl WebSocketClient {
-    pub fn read(&mut self) {
+    pub fn read_handshake(&mut self) {
         loop {
             let mut buf = [0; 2048];
             match self.socket.try_read(&mut buf) {
@@ -52,9 +51,14 @@ impl WebSocketClient {
                 Ok(None) =>
                     // Socket buffer has got no more bytes.
                     break,
-                Ok(Some(len)) => {
-                    self.http_parser.parse(&buf[0..len]);
-                    if self.http_parser.is_upgrade() {
+                Ok(Some(_len)) => {
+                    let is_upgrade = if let ClientState::AwaitingHandshake(ref parser_state) = self.state {
+                        let mut parser = parser_state.borrow_mut();
+                        parser.parse(&buf);
+                        parser.is_upgrade()
+                    } else { false };
+
+                    if is_upgrade {
                         // Change the current state
                         self.state = ClientState::HandshakeResponse;
 
@@ -65,6 +69,15 @@ impl WebSocketClient {
                     }
                 }
             }
+        }
+    }
+
+    pub fn read(&mut self) {
+        match self.state {
+            ClientState::AwaitingHandshake(_) => {
+                self.read_handshake();
+            },
+            _ => {}
         }
     }
 
@@ -105,18 +118,14 @@ impl WebSocketClient {
             // to read its contents:
             headers: headers.clone(),
 
-            http_parser: Parser::request(HttpParser {
-                current_key: None,
-
-                // ... and the second clone to write new headers to it:
-                headers: headers.clone()
-            }),
-
             // Initial events that interest us
             interest: EventSet::readable(),
 
             // Initial state
-            state: ClientState::AwaitingHandshake
+            state: ClientState::AwaitingHandshake(RefCell::new(Parser::request(HttpParser {
+                current_key: None,
+                headers: headers.clone()
+            })))
         }
     }
 }
