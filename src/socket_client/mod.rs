@@ -5,6 +5,7 @@ extern crate http_muncher;
 
 mod client_state;
 mod http_parser;
+mod frame;
 
 use self::mio::*;
 use self::mio::tcp::*;
@@ -16,6 +17,7 @@ use std::fmt;
 use self::client_state::ClientState;
 use self::http_parser::HttpParser;
 use self::http_muncher::Parser;
+use self::frame::WebSocketFrame;
 
 fn gen_key(key: &String) -> String {
     let mut m = sha1::Sha1::new();
@@ -76,6 +78,14 @@ impl WebSocketClient {
         match self.state {
             ClientState::AwaitingHandshake(_) => {
                 self.read_handshake();
+            },
+            // Add a new state handler:
+            ClientState::Connected => {
+                let frame = WebSocketFrame::read(&mut self.socket);
+                match frame {
+                    Ok(frame) => println!("{:?}", frame),
+                    Err(e) => println!("error while reading frame: {}", e)
+                }
             },
             _ => {}
         }
