@@ -38,7 +38,9 @@ pub struct WebSocketClient {
     pub interest: EventSet,
 
     // Add a client state:
-    pub state: ClientState
+    pub state: ClientState,
+
+    outgoing: Vec<WebSocketFrame>
 }
 
 impl WebSocketClient {
@@ -83,7 +85,18 @@ impl WebSocketClient {
             ClientState::Connected => {
                 let frame = WebSocketFrame::read(&mut self.socket);
                 match frame {
-                    Ok(frame) => println!("{:?}", frame),
+                    Ok(frame) => {
+                        println!("{:?}", frame);
+                        // Add a reply frame to the queue:
+                        let reply_frame = WebSocketFrame::from("Hi there!");
+                        self.outgoing.push(reply_frame);
+
+                        // Switch the event subscription to the write mode if the queue is not empty:
+                        if self.outgoing.len() > 0 {
+                            self.interest.remove(EventSet::readable());
+                            self.interest.insert(EventSet::writable());
+                        }
+                    },
                     Err(e) => println!("error while reading frame: {}", e)
                 }
             },
@@ -92,6 +105,29 @@ impl WebSocketClient {
     }
 
     pub fn write(&mut self) {
+        match self.state {
+            ClientState::HandshakeResponse => {
+                self.write_handshake();
+            },
+            ClientState::Connected => {
+                println!("sending {} frames", self.outgoing.len());
+
+                for frame in self.outgoing.iter() {
+                    if let Err(e) = frame.write(&mut self.socket) {
+                        println!("error on write: {}", e);
+                    }
+                }
+
+                self.outgoing.clear();
+
+                self.interest.remove(EventSet::writable());
+                self.interest.insert(EventSet::readable());
+            },
+            _ => {}
+        }
+    }
+
+    fn write_handshake(&mut self) {
         // Get the headers HashMap from the Rc<RefCell<...>> wrapper:
         let headers = self.headers.borrow();
 
@@ -135,7 +171,9 @@ impl WebSocketClient {
             state: ClientState::AwaitingHandshake(RefCell::new(Parser::request(HttpParser {
                 current_key: None,
                 headers: headers.clone()
-            })))
+            }))),
+
+            outgoing: Vec::new()
         }
     }
 }
