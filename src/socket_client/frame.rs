@@ -185,4 +185,33 @@ impl WebSocketFrame {
         try!(output.write(&self.payload));
         Ok(())
     }
+
+    pub fn pong(ping_frame: &WebSocketFrame) -> WebSocketFrame {
+        let payload = ping_frame.payload.clone();
+        WebSocketFrame {
+            header: WebSocketFrameHeader::new_header(payload.len(), OpCode::Pong),
+            payload: payload,
+            mask: None
+        }
+    }
+
+    pub fn close_from(recv_frame: &WebSocketFrame) -> WebSocketFrame {
+        let body = if recv_frame.payload.len() > 0 {
+            let status_code = &recv_frame.payload[0..2];
+            let mut body = Vec::with_capacity(2);
+            body.write(status_code);
+            body
+        } else {
+            Vec::new()
+        };
+        WebSocketFrame {
+            header: WebSocketFrameHeader::new_header(body.len(), OpCode::ConnectionClose),
+            payload: body,
+            mask: None
+        }
+    }
+
+    pub fn is_close(&self) -> bool {
+        self.header.opcode == OpCode::ConnectionClose
+    }
 }

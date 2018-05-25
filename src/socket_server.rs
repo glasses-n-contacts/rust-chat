@@ -57,5 +57,13 @@ impl Handler for WebSocketServer {
             event_loop.reregister(&client.socket, token, client.interest,
                                 PollOpt::edge() | PollOpt::oneshot()).unwrap();
         }
+
+        // Handle connection hangup:
+        if events.is_hup() {
+            let client = self.clients.remove(&token).unwrap();
+
+            client.socket.shutdown(Shutdown::Both);
+            event_loop.deregister(&client.socket);
+        }
     }
 }

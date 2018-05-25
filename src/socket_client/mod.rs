@@ -17,7 +17,7 @@ use std::fmt;
 use self::client_state::ClientState;
 use self::http_parser::HttpParser;
 use self::http_muncher::Parser;
-use self::frame::WebSocketFrame;
+use self::frame::{OpCode, WebSocketFrame};
 
 fn gen_key(key: &String) -> String {
     let mut m = sha1::Sha1::new();
@@ -44,7 +44,7 @@ pub struct WebSocketClient {
 }
 
 impl WebSocketClient {
-    pub fn read_handshake(&mut self) {
+    fn read_handshake(&mut self) {
         loop {
             let mut buf = [0; 2048];
             match self.socket.try_read(&mut buf) {
@@ -76,30 +76,37 @@ impl WebSocketClient {
         }
     }
 
-    pub fn read(&mut self) {
-        match self.state {
-            ClientState::AwaitingHandshake(_) => {
-                self.read_handshake();
-            },
-            // Add a new state handler:
-            ClientState::Connected => {
-                let frame = WebSocketFrame::read(&mut self.socket);
-                match frame {
-                    Ok(frame) => {
+    fn read_frame(&mut self) {
+        let frame = WebSocketFrame::read(&mut self.socket);
+        match frame {
+            Ok(frame) => {
+                match frame.get_opcode() {
+                    OpCode::TextFrame => {
                         println!("{:?}", frame);
-                        // Add a reply frame to the queue:
                         let reply_frame = WebSocketFrame::from("Hi there!");
                         self.outgoing.push(reply_frame);
-
-                        // Switch the event subscription to the write mode if the queue is not empty:
-                        if self.outgoing.len() > 0 {
-                            self.interest.remove(EventSet::readable());
-                            self.interest.insert(EventSet::writable());
-                        }
                     },
-                    Err(e) => println!("error while reading frame: {}", e)
+                    OpCode::Ping => {
+                        println!("ping/pong");
+                        self.outgoing.push(WebSocketFrame::pong(&frame));
+                    },
+                    OpCode::ConnectionClose => {
+                        self.outgoing.push(WebSocketFrame::close_from(&frame));
+                    },
+                    _ => {}
                 }
-            },
+                self.interest.remove(EventSet::readable());
+                self.interest.insert(EventSet::writable());
+            }
+            Err(e) => println!("error while reading frame: {}", e)
+        }
+    }
+
+    pub fn read(&mut self) {
+        match self.state {
+            ClientState::AwaitingHandshake(_) => self.read_handshake(),
+            // Add a new state handler:
+            ClientState::Connected => self.read_frame(),
             _ => {}
         }
     }
@@ -110,18 +117,29 @@ impl WebSocketClient {
                 self.write_handshake();
             },
             ClientState::Connected => {
-                println!("sending {} frames", self.outgoing.len());
+                // Add a boolean flag:
+                let mut close_connection = false;
 
                 for frame in self.outgoing.iter() {
                     if let Err(e) = frame.write(&mut self.socket) {
                         println!("error on write: {}", e);
+                    }
+
+                    // Check if there's a frame that wants to close the connection:
+                    if frame.is_close() {
+                        close_connection = true;
                     }
                 }
 
                 self.outgoing.clear();
 
                 self.interest.remove(EventSet::writable());
-                self.interest.insert(EventSet::readable());
+                // Add a `hup` event if we want to close the connection:
+                if close_connection {
+                    self.interest.insert(EventSet::hup());
+                } else {
+                    self.interest.insert(EventSet::readable());
+                }
             },
             _ => {}
         }
